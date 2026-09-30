@@ -6,7 +6,7 @@ FROM builder-cpu AS builder-openvino
 
 FROM python:3.13-slim-bookworm@sha256:2325bb286ec344af3e5898cc224b5844e2707ac6e26b1632516fd3edc84a5e26 AS builder-cuda
 
-FROM python:3.13-trixie@sha256:4a0820d8b1b1a1e012a23ff9a1296a3e28b48896a4d27a328a91ee197ce619d9 AS builder-armnn
+FROM python:3.13-trixie@sha256:82c46c08c991d3d3ff10476ac5e386c2c28f27bbd3985a02c5e39fe99ab272eb AS builder-armnn
 
 # renovate: datasource=github-releases depName=ARM-software/armnn
 ARG ARMNN_VERSION="v26.07"
