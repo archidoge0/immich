@@ -1,0 +1,45 @@
+name: GHAV Immich 28393 before
+
+on:
+  push:
+    branches:
+      - codex/ghav-immich28393-before
+
+permissions:
+  contents: read
+
+jobs:
+  mobile-unit-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - name: Checkout pinned Before source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 79801595dba3e57cb70cc812098059dac839077b
+          persist-credentials: false
+      - name: Setup pinned source tools
+        uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5.0.1
+        with:
+          version: 2026.3.13
+          sha256: 806790b4a71c93d20e027c40ddf38470fa6e26555275b1181a3c2ccc082ef56f
+          github_token: ${{ github.token }}
+          install_args: flutter node pnpm
+          cache: false
+      - name: Install root formatting dependencies
+        run: pnpm --filter immich-monorepo install --frozen-lockfile
+      - name: Install mobile dependencies
+        run: flutter pub get
+        working-directory: ./mobile
+      - name: Generate translation files
+        run: mise //mobile:codegen:translation
+      - name: Run full mobile tests
+        run: mise //mobile:test -j 1
+      - name: Record task context
+        if: always()
+        run: |
+          echo 'GHAV_ARM=before'
+          echo "GHAV_SOURCE_SHA=$(git rev-parse HEAD)"
+          echo "GHAV_SOURCE_TREE=$(git rev-parse HEAD^{tree})"
+          test "$(git rev-parse HEAD)" = '79801595dba3e57cb70cc812098059dac839077b'
+          test "$(git rev-parse HEAD^{tree})" = '020c085ec7267268d5f9a3b86cef1dc5f5d6fad6'
