@@ -1,0 +1,51 @@
+name: GHAV Immich 19410 Docs Core
+
+on:
+  push:
+    branches:
+      - 'codex/ghav-immich19410-v2-*'
+
+permissions: {}
+
+jobs:
+  build:
+    name: Docs Build
+    permissions:
+      contents: read
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: ./docs
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          ref: '6c7b2e4b5c59264b2a8c23048126a1ef793ac6bc'
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: './docs/.nvmrc'
+          cache: 'npm'
+          cache-dependency-path: '**/package-lock.json'
+      - name: Run npm install
+        run: npm ci
+      - name: Check formatting
+        run: npm run format
+      - name: Run build
+        run: npm run build
+      - name: Docs output witness
+        run: |
+          test -d build
+          echo "FIXED_SOURCE_HEAD=$(git rev-parse HEAD)"
+          count=$(find build -type f | wc -l | tr -d ' ')
+          hash=$(find build -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
+          echo "DOCS_FILE_COUNT=$count"
+          echo "DOCS_SHA256=$hash"
+      - name: Upload build output
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: docs-build-output
+          path: docs/build/
+          include-hidden-files: true
+          retention-days: 1
