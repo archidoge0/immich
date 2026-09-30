@@ -1,0 +1,54 @@
+name: GHAV Immich 19435 web E2E core
+
+on:
+  push:
+    branches:
+      - 'codex/ghav-immich19435-*'
+
+permissions:
+  contents: read
+
+jobs:
+  e2e-tests-web:
+    name: End-to-End Tests (Web)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: ./e2e
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 03966146fe9597a5893ea7fbf0a0d6cc0de487b7
+          persist-credentials: false
+          submodules: 'recursive'
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version-file: './e2e/.nvmrc'
+
+      - name: Run setup typescript-sdk
+        run: npm ci && npm run build
+        working-directory: ./open-api/typescript-sdk
+        if: ${{ !cancelled() }}
+
+      - name: Install dependencies
+        run: npm ci
+        if: ${{ !cancelled() }}
+
+      - name: Install Playwright Browsers
+        run: npx playwright install chromium --only-shell
+        if: ${{ !cancelled() }}
+
+      - name: Docker build
+        run: docker compose build
+        if: ${{ !cancelled() }}
+
+      - name: Run e2e tests (web)
+        run: npx playwright test
+        if: ${{ !cancelled() }}
+
