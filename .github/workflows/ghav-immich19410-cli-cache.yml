@@ -1,0 +1,59 @@
+name: GHAV Immich 19410 complete CLI build
+
+on:
+  push:
+    branches:
+      - 'codex/ghav-immich19410-cli-*'
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: CLI Publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: ./cli
+
+    steps:
+      - name: Checkout fixed historical task source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: archidoge0/immich
+          ref: 6c7b2e4b5c59264b2a8c23048126a1ef793ac6bc
+          persist-credentials: false
+
+      - name: Assert fixed source and lockfiles
+        run: |
+          test "$(git rev-parse HEAD)" = '6c7b2e4b5c59264b2a8c23048126a1ef793ac6bc'
+          echo "GHAV_SOURCE_SHA=$(git rev-parse HEAD)"
+          sha256sum package-lock.json ../open-api/typescript-sdk/package-lock.json
+
+      # Setup .npmrc file to publish to npm
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.16.0'
+          registry-url: 'https://registry.npmjs.org'
+      - name: Prepare SDK
+        run: npm ci --prefix ../open-api/typescript-sdk/
+      - name: Build SDK
+        run: npm run build --prefix ../open-api/typescript-sdk/
+      - run: npm ci
+      - run: npm run build
+      - name: Record complete SDK and CLI build-output witnesses
+        run: |
+          echo "GHAV_NODE_VERSION=$(node --version)"
+          test -s ../open-api/typescript-sdk/build/index.js
+          test -s dist/index.js
+          echo "GHAV_SDK_OUTPUT_FILES=$(find ../open-api/typescript-sdk/build -type f | wc -l)"
+          echo "GHAV_CLI_OUTPUT_FILES=$(find dist -type f | wc -l)"
+          sha256sum ../open-api/typescript-sdk/build/index.js dist/index.js
+      - run: npm publish
+        if: ${{ github.event_name == 'release' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
