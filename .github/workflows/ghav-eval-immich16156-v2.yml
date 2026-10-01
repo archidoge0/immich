@@ -1,0 +1,123 @@
+name: GHAV Immich 16156 server image v2
+on:
+  push:
+    branches:
+      - codex/ghav-immich16156-v2-before
+      - codex/ghav-immich16156-v2-human
+      - codex/ghav-immich16156-v2-ours
+permissions:
+  contents: read
+  packages: write
+jobs:
+  server-image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout fixed historical source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 924d11a913642a60553b979c5311f3d249ff528a
+          persist-credentials: false
+      - name: Verify fixed complete server build inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "924d11a913642a60553b979c5311f3d249ff528a"
+          echo "GHAV_SOURCE_SHA=$(git rev-parse HEAD)"
+          sha256sum server/Dockerfile server/package-lock.json web/package-lock.json open-api/typescript-sdk/package-lock.json
+      - name: Apply identical historical dependency and output preparation
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/ghav-immich16156-common.py <<'PY'
+          """Apply the same source-side reproducibility preparation in all three arms.
+          
+          This operates only on the checked-out historical Immich #16156 source.  The
+          timed treatment remains the Human cache importer/exporter in the workflow.
+          """
+          
+          import hashlib
+          from pathlib import Path
+          
+          
+          EXPECTED = {
+              "web/svelte.config.js": "775ae9dd3cacecd1fbf402347bf76fe7fea1371d19178d11a7f5ab8b9403bd7e",
+              "server/Dockerfile": "c71808ed9a7d243b70371d17347f9280bc246a78b9e457f555fe5c73023325ed",
+          }
+          
+          
+          def _sha256(path):
+              return hashlib.sha256(path.read_bytes()).hexdigest()
+          
+          
+          def main():
+              for name, expected in EXPECTED.items():
+                  path = Path(name)
+                  actual = _sha256(path)
+                  if actual != expected:
+                      raise SystemExit("unexpected historical input {}: {}".format(name, actual))
+          
+              svelte = Path("web/svelte.config.js")
+              source = svelte.read_text()
+              needle = "  kit: {\n"
+              if source.count(needle) != 1:
+                  raise SystemExit("SvelteKit config insertion point is not unique")
+              svelte.write_text(source.replace(needle, "  kit: {\n    version: { name: '1739799705000' },\n", 1))
+          
+              dockerfile = Path("server/Dockerfile")
+              source = dockerfile.read_text()
+              needle = "RUN npm link && npm install -g @immich/cli && npm cache clean --force"
+              if source.count(needle) != 1:
+                  raise SystemExit("CLI installation instruction is not unique")
+              replacement = (
+                  "RUN npm link && npm install -g @immich/cli@2.2.50 && npm cache clean --force && \\\n"
+                  "  rm -rf /root/.npm/_logs /tmp/node-compile-cache"
+              )
+              dockerfile.write_text(source.replace(needle, replacement, 1))
+          
+              for name in EXPECTED:
+                  print("GHAV_PREP_SHA256 {} {}".format(_sha256(Path(name)), name))
+          
+          
+          if __name__ == "__main__":
+              main()
+          PY
+          python3 /tmp/ghav-immich16156-common.py
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
+      - name: Log in to fork-owned GHCR namespace
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build complete linux-amd64 server image
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc
+        env:
+          SOURCE_DATE_EPOCH: "1739799705"
+        with:
+          context: .
+          file: server/Dockerfile
+          platforms: linux/amd64
+          push: false
+          provenance: false
+          sbom: false
+          outputs: type=oci,dest=/tmp/ghav-immich16156-server.oci.tar,rewrite-timestamp=true
+          build-args: |
+            DEVICE=cpu
+            BUILD_ID=ghav-fixed-16156
+            BUILD_IMAGE=ghav-fixed-16156
+            BUILD_SOURCE_REF=ghav-fixed-16156
+            BUILD_SOURCE_COMMIT=924d11a913642a60553b979c5311f3d249ff528a
+          cache-from: type=registry,ref=ghcr.io/archidoge0/ghav-immich16156-server-cache:amd64-human-v2-20261001
+          cache-to: type=registry,ref=ghcr.io/archidoge0/ghav-immich16156-server-cache:amd64-human-v2-20261001,mode=max,compression=zstd
+      - name: Check and fingerprint complete image output
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s /tmp/ghav-immich16156-server.oci.tar
+          echo "GHAV_IMAGE_DIGEST=${{ steps.build.outputs.digest }}"
+          echo "GHAV_OCI_ARCHIVE_SHA256=$(sha256sum /tmp/ghav-immich16156-server.oci.tar | cut -d' ' -f1)"
+          echo "GHAV_OCI_ARCHIVE_BYTES=$(stat -c %s /tmp/ghav-immich16156-server.oci.tar)"
+          tar -xOf /tmp/ghav-immich16156-server.oci.tar index.json
