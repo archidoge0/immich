@@ -1,0 +1,67 @@
+name: GHAV Immich 19410 complete server unit checks
+
+on:
+  push:
+    branches:
+      - 'codex/ghav-immich19410-serverunit-*'
+
+permissions:
+  contents: read
+
+jobs:
+  server-unit-tests:
+    name: Test & Lint Server
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CI: 'true'
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: ./server
+
+    steps:
+      - name: Checkout fixed historical task source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: archidoge0/immich
+          ref: 6c7b2e4b5c59264b2a8c23048126a1ef793ac6bc
+          persist-credentials: false
+
+      - name: Assert fixed source and lockfiles
+        run: |
+          test "$(git rev-parse HEAD)" = '6c7b2e4b5c59264b2a8c23048126a1ef793ac6bc'
+          echo "GHAV_SOURCE_SHA=$(git rev-parse HEAD)"
+          sha256sum package-lock.json
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.16.0'
+
+      - name: Run npm install
+        run: npm ci
+
+      - name: Run linter
+        run: npm run lint
+        if: ${{ !cancelled() }}
+
+      - name: Run formatter
+        run: npm run format
+        if: ${{ !cancelled() }}
+
+      - name: Run tsc
+        run: npm run check
+        if: ${{ !cancelled() }}
+
+      - name: Run small tests & coverage
+        run: npm test
+        if: ${{ !cancelled() }}
+
+      - name: Record server test-output witnesses
+        if: ${{ !cancelled() }}
+        run: |
+          echo "GHAV_NODE_VERSION=$(node --version)"
+          test -s package-lock.json
+          sha256sum package-lock.json
