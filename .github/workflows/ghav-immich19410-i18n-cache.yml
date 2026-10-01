@@ -1,0 +1,76 @@
+name: GHAV Immich 19410 complete i18n checks before
+on:
+  push:
+    branches: [codex/ghav-immich19410-i18n-before]
+permissions:
+  contents: read
+jobs:
+  i18n-tests:
+    name: Test i18n
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout fixed historical task source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: archidoge0/immich
+          ref: 6c7b2e4b5c59264b2a8c23048126a1ef793ac6bc
+          persist-credentials: false
+      - name: Assert fixed source and inputs
+        run: |
+          test "$(git rev-parse HEAD)" = '6c7b2e4b5c59264b2a8c23048126a1ef793ac6bc'
+          test "$(git rev-parse HEAD^{tree})" = 'df766e5802d69b336f30f101ab05b1d83597d68a'
+          test -s web/package-lock.json
+          echo "GHAV_SOURCE_SHA=$(git rev-parse HEAD)"
+          echo "GHAV_SOURCE_TREE=$(git rev-parse HEAD^{tree})"
+          echo "GHAV_WEB_LOCK=$(sha256sum web/package-lock.json | cut -d' ' -f1)"
+          python3 - <<'PY'
+          import hashlib
+          from pathlib import Path
+          paths = sorted(Path('i18n').glob('*.json'))
+          assert paths
+          h=hashlib.sha256()
+          for p in paths: h.update(p.as_posix().encode()+b'\0'+p.read_bytes()+b'\0')
+          print('GHAV_I18N_INPUT_COUNT='+str(len(paths)))
+          print('GHAV_I18N_INPUT_SHA256='+h.hexdigest())
+          PY
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: './web/.nvmrc'
+      - name: Install dependencies
+        run: npm --prefix=web ci
+      - name: Format
+        run: npm --prefix=web run format:i18n
+      - name: Find file changes
+        uses: tj-actions/verify-changed-files@a1c6acee9df209257a246f2cc6ae8cb6581c1edf # v20.0.4
+        id: verify-changed-files
+        with:
+          files: |
+            i18n/**
+      - name: Verify files have not changed
+        if: steps.verify-changed-files.outputs.files_changed == 'true'
+        env:
+          CHANGED_FILES: ${{ steps.verify-changed-files.outputs.changed_files }}
+        run: |
+          echo "ERROR: i18n files not up to date!"
+          echo "Changed files: ${CHANGED_FILES}"
+          exit 1
+      - name: Record complete i18n output witnesses
+        if: ${{ !cancelled() }}
+        run: |
+          echo "GHAV_NODE_VERSION=$(node --version)"
+          echo "GHAV_NPM_VERSION=$(npm --version)"
+          echo "GHAV_WEB_FINAL_LOCK=$(sha256sum web/package-lock.json | cut -d' ' -f1)"
+          echo "GHAV_CHANGED_FILES=${{ steps.verify-changed-files.outputs.changed_files }}"
+          echo "GHAV_FILES_CHANGED=${{ steps.verify-changed-files.outputs.files_changed }}"
+          python3 - <<'PY'
+          import hashlib
+          from pathlib import Path
+          paths = sorted(Path('i18n').glob('*.json'))
+          assert paths
+          h=hashlib.sha256()
+          for p in paths: h.update(p.as_posix().encode()+b'\0'+p.read_bytes()+b'\0')
+          print('GHAV_I18N_OUTPUT_COUNT='+str(len(paths)))
+          print('GHAV_I18N_OUTPUT_SHA256='+h.hexdigest())
+          PY
