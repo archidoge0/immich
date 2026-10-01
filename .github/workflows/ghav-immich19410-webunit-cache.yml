@@ -1,0 +1,71 @@
+name: GHAV Immich 19410 complete web unit checks before
+
+on:
+  push:
+    branches:
+      - codex/ghav-immich19410-webunit-before
+
+permissions:
+  contents: read
+
+jobs:
+  web-unit-tests:
+    name: Test Web
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: ./web
+    steps:
+      - name: Checkout fixed historical task source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: archidoge0/immich
+          ref: 6c7b2e4b5c59264b2a8c23048126a1ef793ac6bc
+          persist-credentials: false
+      - name: Assert fixed source and lockfiles
+        working-directory: .
+        run: |
+          test "$(git rev-parse HEAD)" = '6c7b2e4b5c59264b2a8c23048126a1ef793ac6bc'
+          test "$(git rev-parse HEAD^{tree})" = 'df766e5802d69b336f30f101ab05b1d83597d68a'
+          test -s web/package-lock.json
+          test -s open-api/typescript-sdk/package-lock.json
+          echo "GHAV_SOURCE_SHA=$(git rev-parse HEAD)"
+          echo "GHAV_SOURCE_TREE=$(git rev-parse HEAD^{tree})"
+          echo "GHAV_WEB_LOCK=$(sha256sum web/package-lock.json | cut -d' ' -f1)"
+          echo "GHAV_SDK_LOCK=$(sha256sum open-api/typescript-sdk/package-lock.json | cut -d' ' -f1)"
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.16.0'
+      - name: Run setup typescript-sdk
+        run: npm ci && npm run build
+        working-directory: ./open-api/typescript-sdk
+      - name: Run npm install
+        run: npm ci
+      - name: Run tsc
+        run: npm run check:typescript
+        if: ${{ !cancelled() }}
+      - name: Run unit tests & coverage
+        run: npm run test
+        if: ${{ !cancelled() }}
+      - name: Record complete web test-output witnesses
+        if: ${{ !cancelled() }}
+        working-directory: .
+        run: |
+          echo "GHAV_NODE_VERSION=$(node --version)"
+          echo "GHAV_NPM_VERSION=$(npm --version)"
+          python3 - <<'PY'
+          import hashlib
+          from pathlib import Path
+          root = Path('open-api/typescript-sdk/dist')
+          files = sorted((p for p in root.rglob('*') if p.is_file()), key=lambda p: p.as_posix())
+          assert files
+          h = hashlib.sha256()
+          for path in files:
+              h.update(path.as_posix().encode() + b'\0')
+              h.update(path.read_bytes())
+              h.update(b'\0')
+          print('GHAV_SDK_DIST_COUNT=' + str(len(files)))
+          print('GHAV_SDK_DIST_SHA256=' + h.hexdigest())
+          PY
