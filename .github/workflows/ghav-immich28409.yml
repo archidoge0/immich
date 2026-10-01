@@ -1,0 +1,90 @@
+name: GHAV Immich 28409 before
+
+on:
+  push:
+    branches:
+      - codex/ghav-immich28409-before
+
+permissions:
+  contents: read
+
+jobs:
+  build-sign-android:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+    steps:
+      - name: Checkout pinned Before source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: aeaf84648210dfe16547de4467f7d05758bf2142
+          persist-credentials: false
+      - name: Verify source snapshot
+        run: |
+          test "$(git rev-parse HEAD)" = 'aeaf84648210dfe16547de4467f7d05758bf2142'
+          test "$(git rev-parse HEAD^{tree})" = 'a720110064f00e10bfbbd97975ba4ca88a7a3c50'
+      - name: Setup pinned source tools
+        uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5.0.1
+        with:
+          version: 2026.3.13
+          sha256: 806790b4a71c93d20e027c40ddf38470fa6e26555275b1181a3c2ccc082ef56f
+          github_token: ${{ github.token }}
+          install_args: flutter node pnpm
+          cache: false
+      - name: Set up Java 17
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: zulu
+          java-version: '17'
+      - name: Restore Gradle cache
+        id: gradle-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            ~/.android/sdk
+            mobile/android/.gradle
+            mobile/.dart_tool
+          key: ghav-immich28409-gradle-${{ runner.os }}-v1
+      - name: Record cache restore state
+        run: |
+          echo "GHAV_CACHE_HIT=${{ steps.gradle-cache.outputs.cache-hit }}"
+          echo "GHAV_CACHE_MATCHED_KEY=${{ steps.gradle-cache.outputs.cache-matched-key }}"
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+        with:
+          packages: ''
+      - name: Install root formatting dependencies
+        run: pnpm --filter immich-monorepo install --frozen-lockfile
+      - name: Install Flutter packages
+        run: flutter pub get
+        working-directory: ./mobile
+      - name: Generate translation files
+        run: mise //mobile:codegen:translation
+      - name: Generate platform APIs
+        run: mise //mobile:codegen:pigeon
+        working-directory: ./mobile
+      - name: Build release APK with source debug-signing fallback
+        run: flutter build apk --release
+        working-directory: ./mobile
+      - name: Record APK identity
+        run: |
+          find mobile/build/app/outputs/flutter-apk -maxdepth 1 -type f -name '*.apk' -print -exec sha256sum {} \;
+          test -n "$(find mobile/build/app/outputs/flutter-apk -maxdepth 1 -type f -name '*.apk' -print -quit)"
+      - name: Upload APK
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ghav-immich28409-before-apk
+          path: mobile/build/app/outputs/flutter-apk/*.apk
+          if-no-files-found: error
+      - name: Save Gradle cache on miss
+        if: steps.gradle-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            ~/.android/sdk
+            mobile/android/.gradle
+            mobile/.dart_tool
+          key: ${{ steps.gradle-cache.outputs.cache-primary-key }}
