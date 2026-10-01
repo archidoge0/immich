@@ -1,0 +1,63 @@
+name: GHAV Immich 1429 nginx image
+on:
+  push:
+    branches:
+      - codex/ghav-immich1429-before
+      - codex/ghav-immich1429-human
+      - codex/ghav-immich1429-ours
+permissions:
+  contents: read
+  packages: write
+jobs:
+  nginx-image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout fixed historical source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 8b73c2bf8a29b18bf3848c3e3f0609d86e51e7ac
+          persist-credentials: false
+      - name: Pin common Docker build input
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "8b73c2bf8a29b18bf3848c3e3f0609d86e51e7ac"
+          test "$(head -n 1 nginx/Dockerfile)" = "FROM docker.io/nginxinc/nginx-unprivileged:latest"
+          sed -i '1c\FROM docker.io/nginxinc/nginx-unprivileged@sha256:929e1d5e610e8aa89a1715ba44dce5edb4d42c172a208c171233292f472560c5' nginx/Dockerfile
+          echo "GHAV_SOURCE_SHA=$(git rev-parse HEAD)"
+          sha256sum nginx/Dockerfile nginx/LICENSE nginx/nginx.conf nginx/start.sh
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
+      - name: Log in to fork-owned GHCR namespace
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build full three-platform nginx image
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc
+        env:
+          SOURCE_DATE_EPOCH: "1674760445"
+        with:
+          context: ./nginx
+          platforms: linux/arm/v7,linux/amd64,linux/arm64
+          tags: ghcr.io/archidoge0/ghav-immich1429-nginx:fixture
+          push: false
+          provenance: false
+          sbom: false
+          outputs: type=oci,dest=/tmp/ghav-immich1429-nginx.oci.tar,rewrite-timestamp=true
+          cache-from: type=gha,scope=ghav-immich1429-nginx-ours-v1-20261001
+          cache-to: type=gha,scope=ghav-immich1429-nginx-ours-v1-20261001,mode=max
+      - name: Check and fingerprint complete image output
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s /tmp/ghav-immich1429-nginx.oci.tar
+          echo "GHAV_IMAGE_DIGEST=${{ steps.build.outputs.digest }}"
+          echo "GHAV_OCI_ARCHIVE_SHA256=$(sha256sum /tmp/ghav-immich1429-nginx.oci.tar | cut -d' ' -f1)"
+          echo "GHAV_OCI_ARCHIVE_BYTES=$(stat -c %s /tmp/ghav-immich1429-nginx.oci.tar)"
+          tar -xOf /tmp/ghav-immich1429-nginx.oci.tar index.json
