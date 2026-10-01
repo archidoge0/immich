@@ -1,0 +1,188 @@
+name: GHAV Immich 12267 complete E2E core
+'on':
+  push:
+    branches:
+    - codex/ghav-immich12267-*
+permissions:
+  contents: read
+  pull-requests: read
+concurrency:
+  group: ghav-immich12267-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  pre-job:
+    runs-on: ubuntu-22.04
+    outputs:
+      should_run_web: ${{ steps.found_paths.outputs.web == 'true' || steps.should_force.outputs.should_force == 'true' }}
+      should_run_server: ${{ steps.found_paths.outputs.server == 'true' || steps.should_force.outputs.should_force == 'true'
+        }}
+      should_run_cli: ${{ steps.found_paths.outputs.cli == 'true' || steps.should_force.outputs.should_force == 'true' }}
+      should_run_e2e: ${{ steps.found_paths.outputs.e2e == 'true' || steps.should_force.outputs.should_force == 'true' }}
+      should_run_mobile: ${{ steps.found_paths.outputs.mobile == 'true' || steps.should_force.outputs.should_force == 'true'
+        }}
+      should_run_ml: ${{ steps.found_paths.outputs.machine-learning == 'true' || steps.should_force.outputs.should_force ==
+        'true' }}
+      should_run_e2e_web: ${{ steps.found_paths.outputs.e2e == 'true' || steps.found_paths.outputs.web == 'true' || steps.should_force.outputs.should_force
+        == 'true' }}
+      should_run_e2e_server_cli: ${{ steps.found_paths.outputs.e2e == 'true' || steps.found_paths.outputs.server == 'true'
+        || steps.found_paths.outputs.cli == 'true' || steps.should_force.outputs.should_force == 'true' }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        ref: 5d6716d26547e44280a55a3d661cab07659981f1
+    - id: found_paths
+      uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d
+      with:
+        filters: "web:\n  - 'web/**'\n  - 'open-api/typescript-sdk/**'\nserver:\n  - 'server/**'\ncli:\n  - 'cli/**'\n  -\
+          \ 'open-api/typescript-sdk/**'\ne2e:\n  - 'e2e/**'\nmobile:\n  - 'mobile/**'\nmachine-learning:\n  - 'machine-learning/**'\n"
+    - name: Check if we should force jobs to run
+      id: should_force
+      run: echo "should_force=true" >> "$GITHUB_OUTPUT"
+  e2e-tests-lint:
+    name: End-to-End Lint
+    needs: pre-job
+    if: ${{ needs.pre-job.outputs.should_run_e2e == 'true' }}
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: ./e2e
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        ref: 5d6716d26547e44280a55a3d661cab07659981f1
+    - name: Record fixed E2E source and lock context
+      shell: bash
+      run: 'echo "GHAV_SOURCE_SHA=$(git rev-parse HEAD)"
+
+        echo "GHAV_E2E_LOCK_SHA=$(sha256sum e2e/package-lock.json | cut -d '' '' -f1)"
+
+        echo "GHAV_CLI_LOCK_SHA=$(sha256sum cli/package-lock.json | cut -d '' '' -f1)"
+
+        echo "GHAV_SDK_LOCK_SHA=$(sha256sum open-api/typescript-sdk/package-lock.json | cut -d '' '' -f1)"
+
+        echo "GHAV_DOCKERFILE_SHA=$(sha256sum server/Dockerfile | cut -d '' '' -f1)"
+
+        echo "GHAV_COMPOSE_SHA=$(sha256sum e2e/docker-compose.yml | cut -d '' '' -f1)"'
+    - name: Setup Node
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+      with:
+        node-version-file: ./e2e/.nvmrc
+    - name: Record fixed Node version
+      run: echo "GHAV_NODE_VERSION=$(node --version)"
+    - name: Run setup typescript-sdk
+      run: npm ci && npm run build
+      working-directory: ./open-api/typescript-sdk
+      if: ${{ !cancelled() }}
+    - name: Install dependencies
+      run: npm ci
+      if: ${{ !cancelled() }}
+    - name: Run linter
+      run: npm run lint
+      if: ${{ !cancelled() }}
+    - name: Run formatter
+      run: npm run format
+      if: ${{ !cancelled() }}
+    - name: Run tsc
+      run: npm run check
+      if: ${{ !cancelled() }}
+  e2e-tests-server-cli:
+    name: End-to-End Tests (Server & CLI)
+    needs: pre-job
+    if: ${{ needs.pre-job.outputs.should_run_e2e_server_cli == 'true' }}
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: ./e2e
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        submodules: recursive
+        ref: 5d6716d26547e44280a55a3d661cab07659981f1
+    - name: Record fixed E2E source and lock context
+      shell: bash
+      run: 'echo "GHAV_SOURCE_SHA=$(git rev-parse HEAD)"
+
+        echo "GHAV_E2E_LOCK_SHA=$(sha256sum e2e/package-lock.json | cut -d '' '' -f1)"
+
+        echo "GHAV_CLI_LOCK_SHA=$(sha256sum cli/package-lock.json | cut -d '' '' -f1)"
+
+        echo "GHAV_SDK_LOCK_SHA=$(sha256sum open-api/typescript-sdk/package-lock.json | cut -d '' '' -f1)"
+
+        echo "GHAV_DOCKERFILE_SHA=$(sha256sum server/Dockerfile | cut -d '' '' -f1)"
+
+        echo "GHAV_COMPOSE_SHA=$(sha256sum e2e/docker-compose.yml | cut -d '' '' -f1)"'
+    - name: Setup Node
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+      with:
+        node-version-file: ./e2e/.nvmrc
+    - name: Record fixed Node version
+      run: echo "GHAV_NODE_VERSION=$(node --version)"
+    - name: Run setup typescript-sdk
+      run: npm ci && npm run build
+      working-directory: ./open-api/typescript-sdk
+      if: ${{ !cancelled() }}
+    - name: Run setup cli
+      run: npm ci && npm run build
+      working-directory: ./cli
+      if: ${{ !cancelled() }}
+    - name: Install dependencies
+      run: npm ci
+      if: ${{ !cancelled() }}
+    - name: Docker build
+      run: docker compose build
+      if: ${{ !cancelled() }}
+    - name: Run e2e tests (api & cli)
+      run: npm run test
+      if: ${{ !cancelled() }}
+  e2e-tests-web:
+    name: End-to-End Tests (Web)
+    needs: pre-job
+    if: ${{ needs.pre-job.outputs.should_run_e2e_web == 'true' }}
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: ./e2e
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        submodules: recursive
+        ref: 5d6716d26547e44280a55a3d661cab07659981f1
+    - name: Record fixed E2E source and lock context
+      shell: bash
+      run: 'echo "GHAV_SOURCE_SHA=$(git rev-parse HEAD)"
+
+        echo "GHAV_E2E_LOCK_SHA=$(sha256sum e2e/package-lock.json | cut -d '' '' -f1)"
+
+        echo "GHAV_CLI_LOCK_SHA=$(sha256sum cli/package-lock.json | cut -d '' '' -f1)"
+
+        echo "GHAV_SDK_LOCK_SHA=$(sha256sum open-api/typescript-sdk/package-lock.json | cut -d '' '' -f1)"
+
+        echo "GHAV_DOCKERFILE_SHA=$(sha256sum server/Dockerfile | cut -d '' '' -f1)"
+
+        echo "GHAV_COMPOSE_SHA=$(sha256sum e2e/docker-compose.yml | cut -d '' '' -f1)"'
+    - name: Setup Node
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+      with:
+        node-version-file: ./e2e/.nvmrc
+    - name: Record fixed Node version
+      run: echo "GHAV_NODE_VERSION=$(node --version)"
+    - name: Run setup typescript-sdk
+      run: npm ci && npm run build
+      working-directory: ./open-api/typescript-sdk
+      if: ${{ !cancelled() }}
+    - name: Install dependencies
+      run: npm ci
+      if: ${{ !cancelled() }}
+    - name: Install Playwright Browsers
+      run: npx playwright install --with-deps chromium
+      if: ${{ !cancelled() }}
+    - name: Docker build
+      run: docker compose build
+      if: ${{ !cancelled() }}
+    - name: Run e2e tests (web)
+      run: npx playwright test
+      if: ${{ !cancelled() }}
