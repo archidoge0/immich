@@ -1,0 +1,150 @@
+name: GHAV Immich 16156 output diagnosis
+on:
+  push:
+    branches:
+      - codex/ghav-immich16156-diagnostic
+permissions:
+  contents: read
+  packages: write
+jobs:
+  server-image:
+    name: Diagnose independent build ${{ matrix.repeat }}
+    strategy:
+      fail-fast: false
+      matrix:
+        repeat: [1, 2]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout fixed historical source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 924d11a913642a60553b979c5311f3d249ff528a
+          persist-credentials: false
+      - name: Verify fixed complete server build inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "924d11a913642a60553b979c5311f3d249ff528a"
+          echo "GHAV_SOURCE_SHA=$(git rev-parse HEAD)"
+          sha256sum server/Dockerfile server/package-lock.json web/package-lock.json open-api/typescript-sdk/package-lock.json
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
+      - name: Log in to fork-owned GHCR namespace
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build complete linux-amd64 server image
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc
+        env:
+          SOURCE_DATE_EPOCH: "1739799705"
+        with:
+          context: .
+          file: server/Dockerfile
+          platforms: linux/amd64
+          push: false
+          provenance: false
+          sbom: false
+          outputs: type=oci,dest=/tmp/ghav-immich16156-server.oci.tar,rewrite-timestamp=true
+          build-args: |
+            DEVICE=cpu
+            BUILD_ID=ghav-fixed-16156
+            BUILD_IMAGE=ghav-fixed-16156
+            BUILD_SOURCE_REF=ghav-fixed-16156
+            BUILD_SOURCE_COMMIT=924d11a913642a60553b979c5311f3d249ff528a
+      - name: Fingerprint varying complete OCI layers
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/ghav-inspect-oci.py <<'PY'
+          """Fingerprint selected OCI layers without exporting the full image artifact.
+          
+          The historical Immich #16156 pilot's Docker build record shows that only
+          layers 16 (web output) and 21 (global CLI installation) differ.  This reads
+          those complete layer tar streams on the hosted runner and records file bytes
+          and tar metadata for diagnosis; it does not decide benchmark eligibility.
+          """
+          
+          import argparse
+          import hashlib
+          import json
+          import tarfile
+          from pathlib import Path
+          
+          
+          def _sha256(stream):
+              digest = hashlib.sha256()
+              while True:
+                  chunk = stream.read(1024 * 1024)
+                  if not chunk:
+                      return digest.hexdigest()
+                  digest.update(chunk)
+          
+          
+          def inspect(oci_path, layer_indices=(16, 21)):
+              with tarfile.open(oci_path, "r") as archive:
+                  index = json.load(archive.extractfile("index.json"))
+                  image_digest = index["manifests"][0]["digest"]
+                  manifest_path = "blobs/sha256/" + image_digest.split(":", 1)[1]
+                  manifest = json.load(archive.extractfile(manifest_path))
+                  result = {
+                      "image_digest": image_digest,
+                      "config_digest": manifest["config"]["digest"],
+                      "layers": {},
+                  }
+                  for index_number in layer_indices:
+                      layer = manifest["layers"][index_number]
+                      layer_path = "blobs/sha256/" + layer["digest"].split(":", 1)[1]
+                      entries = []
+                      with archive.extractfile(layer_path) as layer_stream:
+                          with tarfile.open(fileobj=layer_stream, mode="r|gz") as layer_tar:
+                              for member in layer_tar:
+                                  entry = {
+                                      "path": member.name,
+                                      "type": member.type.decode("ascii", "replace"),
+                                      "size": member.size,
+                                      "mtime": member.mtime,
+                                      "mode": member.mode,
+                                      "uid": member.uid,
+                                      "gid": member.gid,
+                                      "linkname": member.linkname,
+                                      "pax_headers": member.pax_headers,
+                                  }
+                                  if member.isfile():
+                                      entry["sha256"] = _sha256(layer_tar.extractfile(member))
+                                  entries.append(entry)
+                      result["layers"][str(index_number)] = {
+                          "digest": layer["digest"],
+                          "compressed_bytes": layer["size"],
+                          "entries": sorted(entries, key=lambda item: (item["path"], item["type"])),
+                      }
+                  return result
+          
+          
+          def main():
+              parser = argparse.ArgumentParser()
+              parser.add_argument("oci_archive", type=Path)
+              parser.add_argument("output_json", type=Path)
+              args = parser.parse_args()
+              result = inspect(args.oci_archive)
+              args.output_json.write_text(json.dumps(result, sort_keys=True, indent=2) + "\n")
+              print("GHAV_IMAGE_DIGEST=" + result["image_digest"])
+              for number, layer in result["layers"].items():
+                  print("GHAV_LAYER_{}_DIGEST={}".format(number, layer["digest"]))
+                  print("GHAV_LAYER_{}_ENTRIES={}".format(number, len(layer["entries"])))
+          
+          
+          if __name__ == "__main__":
+              main()
+          PY
+          python3 /tmp/ghav-inspect-oci.py /tmp/ghav-immich16156-server.oci.tar /tmp/ghav-immich16156-diagnostic.json
+          echo "GHAV_OCI_ARCHIVE_SHA256=$(sha256sum /tmp/ghav-immich16156-server.oci.tar | cut -d' ' -f1)"
+      - name: Upload small diagnostic JSON
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: ghav-immich16156-diag-${{ matrix.repeat }}
+          path: /tmp/ghav-immich16156-diagnostic.json
+          if-no-files-found: error
