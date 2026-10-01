@@ -58,6 +58,24 @@ jobs:
       - name: Install Flutter packages
         run: flutter pub get
         working-directory: ./mobile
+      - name: Common compatibility repair for home_widget 0.8.1 JVM target
+        run: |
+          python3 - <<'PY'
+          from hashlib import sha256
+          from pathlib import Path
+
+          path = Path.home() / '.pub-cache/hosted/pub.dev/home_widget-0.8.1/android/build.gradle'
+          original = path.read_bytes()
+          assert sha256(original).hexdigest() == '6aa14b61115fb37911c87976d6bace541d83439f766d74551b5d9b24b6424b76'
+          assert original.count(b'JavaVersion.VERSION_1_8') == 2
+          assert original.count(b'jvmTarget = "1.8"') == 1
+          repaired = original.replace(b'JavaVersion.VERSION_1_8', b'JavaVersion.VERSION_17')
+          repaired = repaired.replace(b'jvmTarget = "1.8"', b'jvmTarget = "17"')
+          assert sha256(repaired).hexdigest() == '4a6c0ffc00d5a3fbba78c5cf20ca51d16491b98e601eb0a3c5a7fcc59cc761cc'
+          path.write_bytes(repaired)
+          print('GHAV_HOME_WIDGET_ORIGINAL_SHA=' + sha256(original).hexdigest())
+          print('GHAV_HOME_WIDGET_REPAIRED_SHA=' + sha256(repaired).hexdigest())
+          PY
       - name: Generate translation files
         run: mise //mobile:codegen:translation
       - name: Generate platform APIs
