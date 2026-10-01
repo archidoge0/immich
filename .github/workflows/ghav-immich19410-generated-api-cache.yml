@@ -1,0 +1,81 @@
+name: GHAV Immich 19410 complete OpenAPI generation before
+
+on:
+  push:
+    branches:
+      - codex/ghav-immich19410-generated-api-before
+
+permissions:
+  contents: read
+
+jobs:
+  generated-api-up-to-date:
+    name: OpenAPI Clients
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: 6c7b2e4b5c59264b2a8c23048126a1ef793ac6bc
+
+      - name: Verify pinned source and input lock
+        working-directory: .
+        run: |
+          test "$(git rev-parse HEAD)" = '6c7b2e4b5c59264b2a8c23048126a1ef793ac6bc'
+          test "$(git rev-parse HEAD^{tree})" = 'df766e5802d69b336f30f101ab05b1d83597d68a'
+          echo "GHAV_SOURCE_SHA=$(git rev-parse HEAD)"
+          echo "GHAV_SOURCE_TREE=$(git rev-parse HEAD^{tree})"
+          echo "GHAV_INPUT_LOCK=$(sha256sum server/package-lock.json | cut -d' ' -f1)"
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.16.0'
+
+      - name: Install server dependencies
+        run: npm --prefix=server ci
+
+      - name: Build the app
+        run: npm --prefix=server run build
+
+      - name: Run API generation
+        run: make open-api
+
+      - name: Find file changes
+        uses: tj-actions/verify-changed-files@a1c6acee9df209257a246f2cc6ae8cb6581c1edf # v20.0.4
+        id: verify-changed-files
+        with:
+          files: |
+            mobile/openapi
+            open-api/typescript-sdk
+            open-api/immich-openapi-specs.json
+
+      - name: Verify files have not changed
+        if: steps.verify-changed-files.outputs.files_changed == 'true'
+        env:
+          CHANGED_FILES: ${{ steps.verify-changed-files.outputs.changed_files }}
+        run: |
+          echo "ERROR: Generated files not up to date!"
+          echo "Changed files: ${CHANGED_FILES}"
+          exit 1
+
+      - name: Record complete OpenAPI generation witnesses
+        if: ${{ !cancelled() }}
+        run: |
+          test -s server/dist/main.js
+          test -s open-api/immich-openapi-specs.json
+          test -s open-api/typescript-sdk/src/fetch-client.ts
+          test -s open-api/typescript-sdk/build/index.js
+          test -s mobile/openapi/lib/api.dart
+          echo "GHAV_NODE_VERSION=$(node --version)"
+          echo "GHAV_NPM_VERSION=$(npm --version)"
+          echo "GHAV_FINAL_LOCK=$(sha256sum server/package-lock.json | cut -d' ' -f1)"
+          echo "GHAV_SERVER_MAIN=$(sha256sum server/dist/main.js | cut -d' ' -f1)"
+          echo "GHAV_OPENAPI_SPEC=$(sha256sum open-api/immich-openapi-specs.json | cut -d' ' -f1)"
+          echo "GHAV_TYPESCRIPT_CLIENT=$(sha256sum open-api/typescript-sdk/src/fetch-client.ts | cut -d' ' -f1)"
+          echo "GHAV_DART_CLIENT=$(sha256sum mobile/openapi/lib/api.dart | cut -d' ' -f1)"
+          echo "GHAV_SDK_BUILD=$(sha256sum open-api/typescript-sdk/build/index.js | cut -d' ' -f1)"
+          echo "GHAV_GENERATED_TRACKED_DIFF=$(git diff -- open-api mobile/openapi | sha256sum | cut -d' ' -f1)"
