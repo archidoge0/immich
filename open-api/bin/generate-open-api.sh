@@ -15,7 +15,7 @@ function dart {
   patch --no-backup-if-mismatch -u api.mustache <api.mustache.patch
 
   cd ../../
-  npx --yes @openapitools/openapi-generator-cli generate -g dart -i ./immich-openapi-specs.json -o ../mobile/openapi -t ./templates/mobile
+  npx --yes @openapitools/openapi-generator-cli@2.41.0 generate -g dart -i ./immich-openapi-specs.json -o ../mobile/openapi -t ./templates/mobile
 
   # Post generate patches
   patch --no-backup-if-mismatch -u ../mobile/openapi/lib/api_client.dart <./patch/api_client.dart.patch
@@ -27,7 +27,7 @@ function dart {
 }
 
 function typescript {
-  npx --yes oazapfts --optimistic --argumentStyle=object --useEnumType immich-openapi-specs.json typescript-sdk/src/fetch-client.ts
+  npx --yes oazapfts@7.5.0 --optimistic --argumentStyle=object --useEnumType immich-openapi-specs.json typescript-sdk/src/fetch-client.ts
   npm --prefix typescript-sdk ci && npm --prefix typescript-sdk run build
 }
 
